@@ -50,9 +50,12 @@ def generate_image(prompt):
         print(f"Ошибка с моделью: {str(e)}")
         raise e
 
+
 @app.route('/generate', methods=['POST'])
 def generate_image_route():
     try:
+        print(f"API Key exists: {bool(HF_API_KEY)}")
+        print(f"API Key length: {len(HF_API_KEY) if HF_API_KEY else 0}")
         data = request.json
         prompt = data.get('prompt', '')
         
