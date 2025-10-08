@@ -14,47 +14,44 @@ CORS(app)
 HF_API_KEY = os.getenv('HF_API_KEY')
 
 def generate_image(prompt):
-    """Генерация изображения с повторными попытками"""
-    # Попробуем несколько моделей
-    models = [
-        "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5",
-        "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2-1",
-        "https://api-inference.huggingface.co/models/ogkalu/Stable-Diffusion-v1-5"
-    ]
+    """Генерация изображения с вашей моделью Kandinsky"""
+    
+    # Используем вашу модель Kandinsky с LoRA для покемонов
+    model_url = "https://api-inference.huggingface.co/models/YiYiXu/kandinsky_2.2_decoder_lora_pokemon"
     
     headers = {"Authorization": f"Bearer {HF_API_KEY}"}
     
-    for model_url in models:
-        try:
-            print(f"Пробуем модель: {model_url}")
+    try:
+        print(f"Пробуем модель: {model_url}")
+        print(f"Промпт: {prompt}")
+        
+        response = requests.post(model_url, headers=headers, json={
+            "inputs": prompt,
+            "options": {
+                "wait_for_model": True,
+                "use_cache": True
+            },
+            "parameters": {
+                "num_inference_steps": 25,
+                "guidance_scale": 7.5
+            }
+        })
+        
+        print(f"Статус ответа: {response.status_code}")
+        
+        if response.status_code == 200:
+            return response.content
+        elif response.status_code == 503:
+            # Модель загружается
+            raise Exception("Модель загружается, попробуйте через 1-2 минуты")
+        else:
+            error_msg = response.text[:500] if response.text else "Unknown error"
+            print(f"Ошибка от модели: {error_msg}")
+            raise Exception(f"Ошибка API: {error_msg}")
             
-            response = requests.post(model_url, headers=headers, json={
-                "inputs": prompt,
-                "options": {
-                    "wait_for_model": True,
-                    "use_cache": True
-                },
-                "parameters": {
-                    "max_new_tokens": 1000
-                }
-            })
-            
-            if response.status_code == 200:
-                return response.content
-            elif response.status_code == 503:
-                # Модель загружается, пробуем следующую
-                print(f"Модель {model_url} загружается, пробуем следующую...")
-                continue
-            else:
-                print(f"Ошибка от модели {model_url}: {response.text}")
-                continue
-                
-        except Exception as e:
-            print(f"Ошибка с моделью {model_url}: {str(e)}")
-            continue
-    
-    # Если все модели не сработали
-    raise Exception("Все модели недоступны")
+    except Exception as e:
+        print(f"Ошибка с моделью: {str(e)}")
+        raise e
 
 @app.route('/generate', methods=['POST'])
 def generate_image_route():
@@ -90,10 +87,10 @@ def test_model():
     """Тестовый endpoint для проверки модели"""
     try:
         headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-        test_url = "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5"
+        test_url = "https://api-inference.huggingface.co/models/YiYiXu/kandinsky_2.2_decoder_lora_pokemon"
         
         response = requests.post(test_url, headers=headers, json={
-            "inputs": "test image",
+            "inputs": "pikachu",
             "options": {"wait_for_model": False}
         })
         
