@@ -4,9 +4,6 @@ import requests
 import io
 import os
 import time
-from dotenv import load_dotenv
-
-load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
