@@ -3,8 +3,6 @@ from flask_cors import CORS
 import requests
 import io
 import os
-import random
-from PIL import Image, ImageDraw
 
 app = Flask(__name__)
 CORS(app)
@@ -12,72 +10,59 @@ CORS(app)
 HF_API_KEY = os.getenv('HF_API_KEY')
 
 def generate_image(prompt):
-    """Генерация изображения с проверенными моделями"""
+    """Генерация изображения с проверенной моделью"""
     
-    # СПИСОК ГАРАНТИРОВАННО РАБОЧИХ МОДЕЛЕЙ
-    models = [
-        "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2-1",
-        "https://api-inference.huggingface.co/models/ogkalu/Stable-Diffusion-v1-5",
-        "https://api-inference.huggingface.co/models/wavymulder/Analog-Diffusion"
-    ]
+    # ГАРАНТИРОВАННО РАБОЧАЯ МОДЕЛЬ
+    model_url = "https://api-inference.huggingface.co/models/StableDiffusionVN/Flux"
     
     headers = {"Authorization": f"Bearer {HF_API_KEY}"}
     
-    for model_url in models:
-        try:
-            print(f"🔹 Пробуем модель: {model_url}")
+    try:
+        print(f"Пробуем модель: {model_url}")
+        print(f"Промпт: {prompt}")
+        print(f"API Key: {HF_API_KEY[:10]}...")  # Первые 10 символов ключа
+        
+        # Простой запрос без сложных параметров
+        response = requests.post(model_url, headers=headers, json={
+            "inputs": prompt,
+            "options": {
+                "wait_for_model": True,
+                "use_cache": True
+            }
+        })
+        
+        print(f"Статус ответа: {response.status_code}")
+        
+        if response.status_code == 200:
+            print("✅ УСПЕХ: Изображение сгенерировано!")
+            return response.content
+        else:
+            error_msg = response.text[:500] if response.text else "Unknown error"
+            print(f"❌ Ошибка от модели: {error_msg}")
+            raise Exception(f"Ошибка API: {error_msg}")
             
-            response = requests.post(model_url, headers=headers, json={
-                "inputs": prompt,
-                "options": {"wait_for_model": True}
-            }, timeout=30)
-            
-            print(f"🔹 Статус ответа: {response.status_code}")
-            
-            if response.status_code == 200:
-                print(f"✅ УСПЕХ с моделью: {model_url}")
-                return response.content
-            elif response.status_code == 503:
-                print(f"⏳ Модель загружается: {model_url}")
-                continue
-            else:
-                print(f"❌ Ошибка {response.status_code} от {model_url}")
-                continue
-                
-        except Exception as e:
-            print(f"❌ Исключение с {model_url}: {str(e)}")
-            continue
-    
-    # Если все модели не сработали - создаем тестовое изображение
-    print("🔄 Все модели недоступны, создаем тестовое изображение")
-    img = Image.new('RGB', (512, 512), color=(
-        random.randint(50, 200), 
-        random.randint(50, 200), 
-        random.randint(50, 200)
-    ))
-    d = ImageDraw.Draw(img)
-    d.text((50, 250), f"Prompt: {prompt[:30]}", fill=(255, 255, 255))
-    
-    img_bytes = io.BytesIO()
-    img.save(img_bytes, format='PNG')
-    img_bytes.seek(0)
-    return img_bytes.getvalue()
+    except Exception as e:
+        print(f"❌ Ошибка с моделью: {str(e)}")
+        raise e
 
 @app.route('/generate', methods=['POST'])
 def generate_image_route():
     try:
+        print("=== НАЧАЛО ГЕНЕРАЦИИ ===")
+        print(f"API Key exists: {bool(HF_API_KEY)}")
+        
         data = request.json
         prompt = data.get('prompt', '')
         
         if not prompt:
             return jsonify({"error": "Промпт не может быть пустым"}), 400
         
-        print(f"🎨 Получен промпт: {prompt}")
+        print(f"Получен промпт: {prompt}")
         
         # Генерация изображения
         image_bytes = generate_image(prompt)
         
-        print("✅ Возвращаем изображение")
+        print("✅ УСПЕХ: Возвращаем изображение")
         return send_file(
             io.BytesIO(image_bytes),
             mimetype='image/png'
@@ -91,6 +76,15 @@ def generate_image_route():
 @app.route('/health', methods=['GET'])
 def health_check():
     return jsonify({"status": "OK", "message": "Сервер работает"})
+
+@app.route('/test', methods=['GET'])
+def test():
+    """Простой тест"""
+    return jsonify({
+        "api_key_exists": bool(HF_API_KEY),
+        "api_key_length": len(HF_API_KEY) if HF_API_KEY else 0,
+        "status": "ready"
+    })
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)
