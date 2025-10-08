@@ -21,8 +21,8 @@ def generate_image_route():
         if not prompt:
             return jsonify({"error": "Промпт не может быть пустым"}), 400
         
-        # Генерация через Hugging Face
-        API_URL = "https://api-inference.huggingface.co/models/ai-forever/ruStableDiffusion"
+        # Генерация через Hugging Face - ИСПРАВЛЕННАЯ МОДЕЛЬ
+        API_URL = "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5"
         headers = {"Authorization": f"Bearer {HF_API_KEY}"}
         
         response = requests.post(API_URL, headers=headers, json={
