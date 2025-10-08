@@ -2,11 +2,59 @@ from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import requests
 import io
+import os
 import time
-import random
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
+
+HF_API_KEY = os.getenv('HF_API_KEY')
+
+def generate_image(prompt):
+    """Генерация изображения с повторными попытками"""
+    # Попробуем несколько моделей
+    models = [
+        "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5",
+        "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2-1",
+        "https://api-inference.huggingface.co/models/ogkalu/Stable-Diffusion-v1-5"
+    ]
+    
+    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
+    
+    for model_url in models:
+        try:
+            print(f"Пробуем модель: {model_url}")
+            
+            response = requests.post(model_url, headers=headers, json={
+                "inputs": prompt,
+                "options": {
+                    "wait_for_model": True,
+                    "use_cache": True
+                },
+                "parameters": {
+                    "max_new_tokens": 1000
+                }
+            })
+            
+            if response.status_code == 200:
+                return response.content
+            elif response.status_code == 503:
+                # Модель загружается, пробуем следующую
+                print(f"Модель {model_url} загружается, пробуем следующую...")
+                continue
+            else:
+                print(f"Ошибка от модели {model_url}: {response.text}")
+                continue
+                
+        except Exception as e:
+            print(f"Ошибка с моделью {model_url}: {str(e)}")
+            continue
+    
+    # Если все модели не сработали
+    raise Exception("Все модели недоступны")
 
 @app.route('/generate', methods=['POST'])
 def generate_image_route():
@@ -17,59 +65,19 @@ def generate_image_route():
         if not prompt:
             return jsonify({"error": "Промпт не может быть пустым"}), 400
         
-        print(f"Генерируем изображение для: {prompt}")
+        print(f"Получен промпт: {prompt}")
         
-        # Бесплатный API от Prodia (работает без ключа)
-        API_URL = "https://api.prodia.com/v1/sd/generate"
+        # Генерация изображения
+        image_bytes = generate_image(prompt)
         
-        # Создаем задание на генерацию
-        response = requests.post(API_URL, json={
-            "prompt": prompt,
-            "model": "dreamshaper_8.safetensors [9d40847d]",
-            "steps": 25,
-            "cfg_scale": 7,
-            "seed": random.randint(1, 1000000),
-            "upscale": False
-        })
-        
-        print(f"Статус создания задания: {response.status_code}")
-        
-        if response.status_code == 200:
-            job_id = response.json().get('job')
-            print(f"Job ID: {job_id}")
-            
-            # Ждем завершения генерации (макс 30 секунд)
-            for i in range(30):
-                result_response = requests.get(f"https://api.prodia.com/v1/job/{job_id}")
-                result_data = result_response.json()
-                status = result_data.get('status')
-                
-                print(f"Проверка {i+1}/30: {status}")
-                
-                if status == 'succeeded':
-                    image_url = result_data.get('imageUrl')
-                    print(f"Изображение готово: {image_url}")
-                    
-                    # Скачиваем изображение
-                    image_response = requests.get(image_url)
-                    return send_file(
-                        io.BytesIO(image_response.content),
-                        mimetype='image/jpeg'
-                    )
-                elif status == 'failed':
-                    return jsonify({"error": "Генерация не удалась"}), 500
-                    
-                time.sleep(1)  # Ждем 1 секунду между проверками
-            
-            return jsonify({"error": "Генерация заняла слишком много времени"}), 500
-            
-        else:
-            error_text = response.text
-            print(f"Ошибка API: {error_text}")
-            return jsonify({"error": f"Ошибка API: {error_text}"}), 500
+        # Возвращаем изображение
+        return send_file(
+            io.BytesIO(image_bytes),
+            mimetype='image/png'
+        )
         
     except Exception as e:
-        error_msg = f"Ошибка сервера: {str(e)}"
+        error_msg = f"Ошибка генерации: {str(e)}"
         print(error_msg)
         return jsonify({"error": error_msg}), 500
 
@@ -77,19 +85,21 @@ def generate_image_route():
 def health_check():
     return jsonify({"status": "OK", "message": "Сервер работает"})
 
-@app.route('/test', methods=['GET'])
-def test_api():
-    """Тестовый endpoint для проверки API"""
+@app.route('/test-model', methods=['GET'])
+def test_model():
+    """Тестовый endpoint для проверки модели"""
     try:
-        # Простой тест Prodia API
-        response = requests.post("https://api.prodia.com/v1/sd/generate", json={
-            "prompt": "test",
-            "model": "dreamshaper_8.safetensors [9d40847d]",
-            "steps": 5
+        headers = {"Authorization": f"Bearer {HF_API_KEY}"}
+        test_url = "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5"
+        
+        response = requests.post(test_url, headers=headers, json={
+            "inputs": "test image",
+            "options": {"wait_for_model": False}
         })
+        
         return jsonify({
             "status": response.status_code,
-            "message": "Prodia API доступен" if response.status_code == 200 else "Prodia API недоступен"
+            "message": response.text[:200] if response.text else "No response"
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
