@@ -6,6 +6,8 @@ import urllib.parse
 import os
 import random
 import json
+import base64
+from PIL import Image
 
 app = Flask(__name__)
 CORS(app)
@@ -54,32 +56,6 @@ def translate_with_deepseek(text):
         print(f"❌ DeepSeek ошибка: {e}")
         return None
 
-def translate_with_google_simple(text):
-    """Простой Google Translate"""
-    print("🔍 Google: Перевод...")
-    try:
-        url = "https://translate.googleapis.com/translate_a/single"
-        params = {
-            'client': 'gtx',
-            'sl': 'ru',
-            'tl': 'en',
-            'dt': 't',
-            'q': text
-        }
-        
-        response = requests.get(url, params=params, timeout=10)
-        if response.status_code == 200:
-            result = response.json()
-            translation = result[0][0][0]
-            print(f"✅ Google перевел: '{translation}'")
-            return translation
-        else:
-            print(f"❌ Google статус: {response.status_code}")
-            return None
-    except Exception as e:
-        print(f"❌ Google ошибка: {e}")
-        return None
-
 def translate_text(text):
     """Основная функция перевода"""
     if not any(char.lower() in 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя' for char in text):
@@ -89,21 +65,16 @@ def translate_text(text):
     if translation:
         return translation
     
-    translation = translate_with_google_simple(text)
-    if translation:
-        return translation
-    
-    print("⚠️ Все переводчики недоступны, используем оригинальный текст")
+    print("⚠️ Переводчик недоступен, используем оригинальный текст")
     return text
 
-def generate_with_pollinations(prompt, model="nanobanano"):
-    """Генерация через Pollinations.ai с разными моделями"""
+def generate_with_pollinations(prompt, model="nanobanano", image_data=None):
+    """Генерация через Pollinations.ai с поддержкой изображений"""
     encoded_prompt = urllib.parse.quote(prompt)
     seed = random.randint(1, 1000000)
     
-    # ВСЕ МОДЕЛИ Pollinations
     models = {
-        "nanobanano": "nanobanano",  # 🍌 NanoBanano модель!
+        "nanobanano": "nanobanano",
         "pollinations": "pollinations",
         "flux": "flux", 
         "dalle": "dalle",
@@ -113,8 +84,16 @@ def generate_with_pollinations(prompt, model="nanobanano"):
     
     selected_model = models.get(model, "nanobanano")
     
-    # Pollinations URL с выбранной моделью
+    # Базовый URL
     pollinations_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model={selected_model}&width=512&height=512&seed={seed}&nofilter=true"
+    
+    # Если есть изображение, добавляем параметр для img2img
+    if image_data and model == "nanobanano":
+        # Конвертируем изображение в base64 и добавляем к URL
+        if isinstance(image_data, bytes):
+            image_b64 = base64.b64encode(image_data).decode('utf-8')
+            pollinations_url += f"&image={image_b64}"
+        print("🖼️ Используем режим img2img с загруженным изображением")
     
     print(f"🎨 Генерация: {selected_model}, seed: {seed}")
     response = requests.get(pollinations_url, timeout=60)
@@ -139,12 +118,42 @@ def generate_with_huggingface(prompt, model_name):
     else:
         raise Exception(f"HF error: {response.status_code} - {response.text}")
 
+def process_uploaded_image(image_file):
+    """Обработка загруженного изображения"""
+    try:
+        # Читаем файл
+        image_data = image_file.read()
+        
+        # Проверяем и конвертируем изображение
+        img = Image.open(io.BytesIO(image_data))
+        
+        # Ресайз если нужно (опционально)
+        if img.size[0] > 1024 or img.size[1] > 1024:
+            img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+        
+        # Конвертируем обратно в bytes
+        output = io.BytesIO()
+        img.save(output, format='PNG')
+        return output.getvalue()
+        
+    except Exception as e:
+        raise Exception(f"Ошибка обработки изображения: {str(e)}")
+
 @app.route('/generate', methods=['POST'])
 def generate_image_route():
     try:
-        data = request.json
-        prompt = data.get('prompt', '')
-        model_name = data.get('model', 'nanobanano')  # NanoBanano по умолчанию!
+        # Проверяем Content-Type
+        if request.content_type.startswith('multipart/form-data'):
+            # Форма с файлом
+            prompt = request.form.get('prompt', '')
+            model_name = request.form.get('model', 'nanobanano')
+            image_file = request.files.get('image')
+        else:
+            # JSON запрос (без изображения)
+            data = request.json
+            prompt = data.get('prompt', '')
+            model_name = data.get('model', 'nanobanano')
+            image_file = None
         
         if not prompt:
             return jsonify({"error": "Промпт не может быть пустым"}), 400
@@ -157,9 +166,16 @@ def generate_image_route():
         print(f"🔧 Модель: {model_name}")
         print(f"🌐 Переведенный промпт: '{translated_prompt}'")
         
+        # Обрабатываем изображение если есть
+        image_data = None
+        if image_file and image_file.filename:
+            print("🖼️ Обрабатываем загруженное изображение...")
+            image_data = process_uploaded_image(image_file)
+            print("✅ Изображение обработано")
+        
         # Генерация изображения
         if model_name in ["nanobanano", "pollinations", "flux", "dalle", "stable-diffusion", "midjourney"]:
-            image_bytes = generate_with_pollinations(translated_prompt, model_name)
+            image_bytes = generate_with_pollinations(translated_prompt, model_name, image_data)
         else:
             image_bytes = generate_with_huggingface(translated_prompt, model_name)
         
@@ -192,12 +208,10 @@ def translate_endpoint():
         print(f"🧪 Тест перевода: '{text}'")
         
         deepseek_result = translate_with_deepseek(text)
-        google_result = translate_with_google_simple(text)
         
         return jsonify({
             "original": text,
             "deepseek_translation": deepseek_result,
-            "google_translation": google_result,
             "is_russian": any(char.lower() in 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя' for char in text)
         })
         
