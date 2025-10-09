@@ -4,11 +4,60 @@ import requests
 import io
 import urllib.parse
 import os
+import json
+import base64
 
 app = Flask(__name__)
 CORS(app)
 
 HF_API_KEY = os.getenv('HF_API_KEY')
+
+def generate_with_nanobanano(prompt):
+    """Генерация через NanoBanano API"""
+    try:
+        # Вариант 1: Через их внутренний API
+        nanobanano_url = "https://api.nanobanano.com/generate"
+        
+        response = requests.post(nanobanano_url, json={
+            "prompt": prompt,
+            "model": "flux",
+            "width": 512,
+            "height": 512,
+            "steps": 20
+        }, timeout=60)
+        
+        if response.status_code == 200:
+            result = response.json()
+            if 'image' in result:
+                # Декодируем base64
+                image_data = result['image']
+                if image_data.startswith('data:image'):
+                    image_data = image_data.split(',')[1]
+                return base64.b64decode(image_data)
+        
+        # Если первый вариант не сработал, пробуем альтернативный
+        return generate_with_nanobanano_alt(prompt)
+        
+    except Exception as e:
+        raise Exception(f"NanoBanano error: {str(e)}")
+
+def generate_with_nanobanano_alt(prompt):
+    """Альтернативный способ через NanoBanano"""
+    # Пробуем через их демо API
+    alt_url = "https://nanobanano-api.vercel.app/api/generate"
+    
+    response = requests.post(alt_url, json={
+        "prompt": prompt,
+        "enhance_prompt": True
+    }, timeout=60)
+    
+    if response.status_code == 200:
+        result = response.json()
+        if 'image_url' in result:
+            image_response = requests.get(result['image_url'])
+            return image_response.content
+    
+    raise Exception("NanoBanano API недоступен")
 
 def generate_with_pollinations(prompt):
     """Генерация через Pollinations.ai"""
@@ -42,7 +91,7 @@ def generate_image_route():
     try:
         data = request.json
         prompt = data.get('prompt', '')
-        model_name = data.get('model', 'pollinations')
+        model_name = data.get('model', 'nanobanano')  # По умолчанию NanoBanano
         
         if not prompt:
             return jsonify({"error": "Промпт не может быть пустым"}), 400
@@ -50,11 +99,11 @@ def generate_image_route():
         print(f"🎨 Генерируем: {prompt}")
         print(f"🔧 Модель: {model_name}")
         
-        if model_name == "pollinations":
-            # Используем Pollinations.ai
+        if model_name == "nanobanano":
+            image_bytes = generate_with_nanobanano(prompt)
+        elif model_name == "pollinations":
             image_bytes = generate_with_pollinations(prompt)
         else:
-            # Используем Hugging Face
             image_bytes = generate_with_huggingface(prompt, model_name)
         
         print("✅ УСПЕХ: Изображение сгенерировано!")
