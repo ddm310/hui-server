@@ -3,9 +3,39 @@ from flask_cors import CORS
 import requests
 import io
 import urllib.parse
+import os
 
 app = Flask(__name__)
 CORS(app)
+
+HF_API_KEY = os.getenv('HF_API_KEY')
+
+def generate_with_pollinations(prompt):
+    """Генерация через Pollinations.ai"""
+    encoded_prompt = urllib.parse.quote(prompt)
+    pollinations_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=512&height=512"
+    
+    response = requests.get(pollinations_url, timeout=60)
+    
+    if response.status_code == 200:
+        return response.content
+    else:
+        raise Exception(f"Pollinations error: {response.status_code}")
+
+def generate_with_huggingface(prompt, model_name):
+    """Генерация через Hugging Face"""
+    model_url = f"https://api-inference.huggingface.co/models/{model_name}"
+    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
+    
+    response = requests.post(model_url, headers=headers, json={
+        "inputs": prompt,
+        "options": {"wait_for_model": True}
+    })
+    
+    if response.status_code == 200:
+        return response.content
+    else:
+        raise Exception(f"HF error: {response.status_code} - {response.text}")
 
 @app.route('/generate', methods=['POST'])
 def generate_image_route():
@@ -18,26 +48,20 @@ def generate_image_route():
             return jsonify({"error": "Промпт не может быть пустым"}), 400
         
         print(f"🎨 Генерируем: {prompt}")
-        print(f"🔧 Провайдер: Pollinations.ai")
+        print(f"🔧 Модель: {model_name}")
         
-        # Кодируем промпт для URL
-        encoded_prompt = urllib.parse.quote(prompt)
-        
-        # Pollinations.ai API
-        pollinations_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}"
-        
-        response = requests.get(pollinations_url, timeout=60)
-        
-        print(f"🔹 Статус: {response.status_code}")
-        
-        if response.status_code == 200:
-            print("✅ УСПЕХ: Изображение сгенерировано через Pollinations.ai!")
-            return send_file(
-                io.BytesIO(response.content),
-                mimetype='image/png'
-            )
+        if model_name == "pollinations":
+            # Используем Pollinations.ai
+            image_bytes = generate_with_pollinations(prompt)
         else:
-            return jsonify({"error": f"Ошибка Pollinations.ai: {response.status_code}"}), 500
+            # Используем Hugging Face
+            image_bytes = generate_with_huggingface(prompt, model_name)
+        
+        print("✅ УСПЕХ: Изображение сгенерировано!")
+        return send_file(
+            io.BytesIO(image_bytes),
+            mimetype='image/png'
+        )
         
     except Exception as e:
         error_msg = f"Ошибка генерации: {str(e)}"
