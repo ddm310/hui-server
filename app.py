@@ -16,7 +16,6 @@ def translate_with_deepseek(text):
     """Перевод через DeepSeek API"""
     print("🧠 DeepSeek: Перевод...")
     try:
-        # DeepSeek API для перевода (бесплатный)
         response = requests.post(
             'https://api.deepseek.com/v1/chat/completions',
             headers={
@@ -44,7 +43,6 @@ def translate_with_deepseek(text):
         if response.status_code == 200:
             result = response.json()
             translation = result['choices'][0]['message']['content'].strip()
-            # Убираем кавычки если они есть
             translation = translation.strip('"')
             print(f"✅ DeepSeek перевел: '{translation}'")
             return translation
@@ -57,7 +55,7 @@ def translate_with_deepseek(text):
         return None
 
 def translate_with_google_simple(text):
-    """Простой Google Translate через неофициальный API"""
+    """Простой Google Translate"""
     print("🔍 Google: Перевод...")
     try:
         url = "https://translate.googleapis.com/translate_a/single"
@@ -83,37 +81,39 @@ def translate_with_google_simple(text):
         return None
 
 def translate_text(text):
-    """Основная функция перевода с приоритетом DeepSeek"""
+    """Основная функция перевода"""
     if not any(char.lower() in 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя' for char in text):
-        return text  # Возвращаем оригинал если нет русских букв
+        return text
     
-    # Пробуем DeepSeek сначала
     translation = translate_with_deepseek(text)
     if translation:
         return translation
     
-    # Если DeepSeek не сработал, пробуем Google
     translation = translate_with_google_simple(text)
     if translation:
         return translation
     
-    # Если все провалилось, возвращаем оригинал
     print("⚠️ Все переводчики недоступны, используем оригинальный текст")
     return text
 
-def generate_with_pollinations(prompt, model="pollinations"):
-    """Генерация через Pollinations.ai"""
+def generate_with_pollinations(prompt, model="nanobanano"):
+    """Генерация через Pollinations.ai с разными моделями"""
     encoded_prompt = urllib.parse.quote(prompt)
     seed = random.randint(1, 1000000)
     
+    # ВСЕ МОДЕЛИ Pollinations
     models = {
+        "nanobanano": "nanobanano",  # 🍌 NanoBanano модель!
         "pollinations": "pollinations",
         "flux": "flux", 
-        "dalle": "dalle"
+        "dalle": "dalle",
+        "stable-diffusion": "stable-diffusion",
+        "midjourney": "midjourney"
     }
     
-    selected_model = models.get(model, "pollinations")
+    selected_model = models.get(model, "nanobanano")
     
+    # Pollinations URL с выбранной моделью
     pollinations_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model={selected_model}&width=512&height=512&seed={seed}&nofilter=true"
     
     print(f"🎨 Генерация: {selected_model}, seed: {seed}")
@@ -144,7 +144,7 @@ def generate_image_route():
     try:
         data = request.json
         prompt = data.get('prompt', '')
-        model_name = data.get('model', 'pollinations')
+        model_name = data.get('model', 'nanobanano')  # NanoBanano по умолчанию!
         
         if not prompt:
             return jsonify({"error": "Промпт не может быть пустым"}), 400
@@ -158,22 +158,12 @@ def generate_image_route():
         print(f"🌐 Переведенный промпт: '{translated_prompt}'")
         
         # Генерация изображения
-        if model_name in ["pollinations", "flux", "dalle"]:
+        if model_name in ["nanobanano", "pollinations", "flux", "dalle", "stable-diffusion", "midjourney"]:
             image_bytes = generate_with_pollinations(translated_prompt, model_name)
         else:
             image_bytes = generate_with_huggingface(translated_prompt, model_name)
         
         print("✅ УСПЕХ: Изображение сгенерировано!")
-        
-        # Возвращаем изображение и информацию о переводе
-        response_data = {
-            "image_data": image_bytes,
-            "translation_info": {
-                "original": prompt,
-                "translated": translated_prompt,
-                "was_translated": prompt != translated_prompt
-            }
-        }
         
         return send_file(
             io.BytesIO(image_bytes),
@@ -201,7 +191,6 @@ def translate_endpoint():
         
         print(f"🧪 Тест перевода: '{text}'")
         
-        # Пробуем все переводчики
         deepseek_result = translate_with_deepseek(text)
         google_result = translate_with_google_simple(text)
         
