@@ -4,6 +4,8 @@ import requests
 import io
 import urllib.parse
 import os
+import random
+import json
 
 app = Flask(__name__)
 CORS(app)
@@ -11,28 +13,89 @@ CORS(app)
 HF_API_KEY = os.getenv('HF_API_KEY')
 
 def generate_with_pollinations(prompt, model="nanobanano"):
-    """Генерация через Pollinations.ai с выбором модели"""
+    """Генерация через Pollinations.ai с случайным seed"""
     encoded_prompt = urllib.parse.quote(prompt)
     
-    # Pollinations.ai с разными моделями
+    # Добавляем случайный seed для разных результатов
+    seed = random.randint(1, 1000000)
+    
     models = {
-        "nanobanano": "nanobanano",  # NanoBanano модель
-        "pollinations": "pollinations",  # Стандартная модель
+        "nanobanano": "nanobanano",
+        "pollinations": "pollinations", 
         "flux": "flux",
         "dalle": "dalle"
     }
     
     selected_model = models.get(model, "nanobanano")
     
-    pollinations_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model={selected_model}&width=512&height=512"
+    # Pollinations URL с seed и параметрами
+    pollinations_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model={selected_model}&width=512&height=512&seed={seed}&nofilter=true"
     
-    print(f"🔧 Используем модель Pollinations: {selected_model}")
+    print(f"🔧 Используем модель: {selected_model}, seed: {seed}")
     response = requests.get(pollinations_url, timeout=60)
     
     if response.status_code == 200:
         return response.content
     else:
         raise Exception(f"Pollinations error: {response.status_code}")
+
+def generate_with_nanobanano_direct(prompt):
+    """Прямое обращение к NanoBanano API с поддержкой русского"""
+    try:
+        # Пробуем разные варианты NanoBanano API
+        seed = random.randint(1, 1000000)
+        
+        # Вариант 1: Через их официальный API если есть
+        nanobanano_url = "https://api.nanobanano.com/generate"
+        
+        payload = {
+            "prompt": prompt,
+            "model": "flux",
+            "width": 512,
+            "height": 512,
+            "steps": 20,
+            "seed": seed,
+            "enhance_prompt": True  # Важно для русского!
+        }
+        
+        response = requests.post(
+            nanobanano_url, 
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            if 'image' in result:
+                import base64
+                image_data = result['image']
+                if image_data.startswith('data:image'):
+                    image_data = image_data.split(',')[1]
+                return base64.b64decode(image_data)
+        
+        # Если не сработало, используем Pollinations с улучшенными параметрами
+        return generate_with_pollinations_enhanced(prompt, "nanobanano")
+        
+    except Exception as e:
+        raise Exception(f"NanoBanano error: {str(e)}")
+
+def generate_with_pollinations_enhanced(prompt, model="nanobanano"):
+    """Улучшенная версия для русского текста"""
+    # Правильно кодируем русский текст
+    encoded_prompt = urllib.parse.quote(prompt)
+    seed = random.randint(1, 1000000)
+    
+    # Добавляем параметры для лучшего понимания русского
+    pollinations_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model={model}&width=512&height=512&seed={seed}&enhance=true"
+    
+    print(f"🔧 Улучшенная генерация для русского: {prompt}")
+    response = requests.get(pollinations_url, timeout=60)
+    
+    if response.status_code == 200:
+        return response.content
+    else:
+        raise Exception(f"Pollinations enhanced error: {response.status_code}")
 
 def generate_with_huggingface(prompt, model_name):
     """Генерация через Hugging Face"""
@@ -62,9 +125,11 @@ def generate_image_route():
         print(f"🎨 Генерируем: {prompt}")
         print(f"🔧 Модель: {model_name}")
         
-        # Все модели кроме Hugging Face идут через Pollinations
-        if model_name in ["nanobanano", "pollinations", "flux", "dalle"]:
-            image_bytes = generate_with_pollinations(prompt, model_name)
+        # Для NanoBanano используем улучшенную версию с поддержкой русского
+        if model_name == "nanobanano":
+            image_bytes = generate_with_nanobanano_direct(prompt)
+        elif model_name in ["pollinations", "flux", "dalle"]:
+            image_bytes = generate_with_pollinations_enhanced(prompt, model_name)
         else:
             image_bytes = generate_with_huggingface(prompt, model_name)
         
