@@ -119,25 +119,11 @@ def generate_with_huggingface(prompt, model_name):
         raise Exception(f"HF error: {response.status_code} - {response.text}")
 
 def process_uploaded_image(image_file):
-    """Обработка загруженного изображения"""
+    """Упрощенная обработка без Pillow"""
     try:
-        # Читаем файл
-        image_data = image_file.read()
-        
-        # Проверяем и конвертируем изображение
-        img = Image.open(io.BytesIO(image_data))
-        
-        # Ресайз если нужно (опционально)
-        if img.size[0] > 1024 or img.size[1] > 1024:
-            img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
-        
-        # Конвертируем обратно в bytes
-        output = io.BytesIO()
-        img.save(output, format='PNG')
-        return output.getvalue()
-        
+        return image_file.read()
     except Exception as e:
-        raise Exception(f"Ошибка обработки изображения: {str(e)}")
+        raise Exception(f"Ошибка чтения изображения: {str(e)}")
 
 @app.route('/generate', methods=['POST'])
 def generate_image_route():
