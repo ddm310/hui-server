@@ -5,9 +5,7 @@ import io
 import urllib.parse
 import os
 import random
-import json
 import base64
-from PIL import Image
 
 app = Flask(__name__)
 CORS(app)
@@ -21,8 +19,7 @@ def translate_with_deepseek(text):
         response = requests.post(
             'https://api.deepseek.com/v1/chat/completions',
             headers={
-                'Content-Type': 'application/json',
-                'Authorization': f'Bearer {os.getenv("DEEPSEEK_API_KEY", "free")}'
+                'Content-Type': 'application/json'
             },
             json={
                 'model': 'deepseek-chat',
@@ -69,7 +66,7 @@ def translate_text(text):
     return text
 
 def generate_with_pollinations(prompt, model="nanobanano", image_data=None):
-    """Генерация через Pollinations.ai с поддержкой изображений"""
+    """Генерация через Pollinations.ai"""
     encoded_prompt = urllib.parse.quote(prompt)
     seed = random.randint(1, 1000000)
     
@@ -86,14 +83,6 @@ def generate_with_pollinations(prompt, model="nanobanano", image_data=None):
     
     # Базовый URL
     pollinations_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model={selected_model}&width=512&height=512&seed={seed}&nofilter=true"
-    
-    # Если есть изображение, добавляем параметр для img2img
-    if image_data and model == "nanobanano":
-        # Конвертируем изображение в base64 и добавляем к URL
-        if isinstance(image_data, bytes):
-            image_b64 = base64.b64encode(image_data).decode('utf-8')
-            pollinations_url += f"&image={image_b64}"
-        print("🖼️ Используем режим img2img с загруженным изображением")
     
     print(f"🎨 Генерация: {selected_model}, seed: {seed}")
     response = requests.get(pollinations_url, timeout=60)
@@ -119,8 +108,9 @@ def generate_with_huggingface(prompt, model_name):
         raise Exception(f"HF error: {response.status_code} - {response.text}")
 
 def process_uploaded_image(image_file):
-    """Упрощенная обработка без Pillow"""
+    """Упрощенная обработка загруженного изображения БЕЗ Pillow"""
     try:
+        # Просто читаем файл как есть
         return image_file.read()
     except Exception as e:
         raise Exception(f"Ошибка чтения изображения: {str(e)}")
@@ -129,16 +119,16 @@ def process_uploaded_image(image_file):
 def generate_image_route():
     try:
         # Проверяем Content-Type
-        if request.content_type.startswith('multipart/form-data'):
+        if request.content_type and request.content_type.startswith('multipart/form-data'):
             # Форма с файлом
             prompt = request.form.get('prompt', '')
             model_name = request.form.get('model', 'nanobanano')
             image_file = request.files.get('image')
         else:
             # JSON запрос (без изображения)
-            data = request.json
-            prompt = data.get('prompt', '')
-            model_name = data.get('model', 'nanobanano')
+            data = request.get_json()
+            prompt = data.get('prompt', '') if data else ''
+            model_name = data.get('model', 'nanobanano') if data else 'nanobanano'
             image_file = None
         
         if not prompt:
@@ -152,16 +142,9 @@ def generate_image_route():
         print(f"🔧 Модель: {model_name}")
         print(f"🌐 Переведенный промпт: '{translated_prompt}'")
         
-        # Обрабатываем изображение если есть
-        image_data = None
-        if image_file and image_file.filename:
-            print("🖼️ Обрабатываем загруженное изображение...")
-            image_data = process_uploaded_image(image_file)
-            print("✅ Изображение обработано")
-        
         # Генерация изображения
         if model_name in ["nanobanano", "pollinations", "flux", "dalle", "stable-diffusion", "midjourney"]:
-            image_bytes = generate_with_pollinations(translated_prompt, model_name, image_data)
+            image_bytes = generate_with_pollinations(translated_prompt, model_name)
         else:
             image_bytes = generate_with_huggingface(translated_prompt, model_name)
         
@@ -185,8 +168,8 @@ def health_check():
 def translate_endpoint():
     """Отдельный endpoint для тестирования перевода"""
     try:
-        data = request.json
-        text = data.get('text', '')
+        data = request.get_json()
+        text = data.get('text', '') if data else ''
         
         if not text:
             return jsonify({"error": "Текст не может быть пустым"}), 400
