@@ -12,68 +12,98 @@ CORS(app)
 
 HF_API_KEY = os.getenv('HF_API_KEY')
 
-def translate_to_english(text):
-    """Переводит русский текст на английский используя бесплатный API"""
+def translate_with_deepseek(text):
+    """Перевод через DeepSeek API"""
+    print("🧠 DeepSeek: Перевод...")
     try:
-        # Простой переводчик через LibreTranslate (бесплатный)
+        # DeepSeek API для перевода (бесплатный)
         response = requests.post(
-            'https://libretranslate.de/translate',
-            json={
-                'q': text,
-                'source': 'ru',
-                'target': 'en',
-                'format': 'text'
+            'https://api.deepseek.com/v1/chat/completions',
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {os.getenv("DEEPSEEK_API_KEY", "free")}'
             },
-            timeout=10
+            json={
+                'model': 'deepseek-chat',
+                'messages': [
+                    {
+                        'role': 'system',
+                        'content': 'You are a professional translator. Translate the following Russian text to English accurately while preserving the meaning and context. Return only the translation without any additional text.'
+                    },
+                    {
+                        'role': 'user', 
+                        'content': f'Переведи на английский: "{text}"'
+                    }
+                ],
+                'temperature': 0.1,
+                'max_tokens': 1000
+            },
+            timeout=30
         )
         
         if response.status_code == 200:
             result = response.json()
-            return result['translatedText']
+            translation = result['choices'][0]['message']['content'].strip()
+            # Убираем кавычки если они есть
+            translation = translation.strip('"')
+            print(f"✅ DeepSeek перевел: '{translation}'")
+            return translation
         else:
-            # Если LibreTranslate не работает, пробуем MyMemory
-            return translate_with_mymemory(text)
+            print(f"❌ DeepSeek статус: {response.status_code}")
+            return None
             
     except Exception as e:
-        print(f"⚠️ Ошибка перевода: {e}")
-        # Возвращаем оригинальный текст если перевод не удался
-        return text
+        print(f"❌ DeepSeek ошибка: {e}")
+        return None
 
-def translate_with_mymemory(text):
-    """Резервный переводчик"""
+def translate_with_google_simple(text):
+    """Простой Google Translate через неофициальный API"""
+    print("🔍 Google: Перевод...")
     try:
-        response = requests.get(
-            f"https://api.mymemory.translated.net/get",
-            params={
-                'q': text,
-                'langpair': 'ru|en'
-            },
-            timeout=10
-        )
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            'client': 'gtx',
+            'sl': 'ru',
+            'tl': 'en',
+            'dt': 't',
+            'q': text
+        }
         
+        response = requests.get(url, params=params, timeout=10)
         if response.status_code == 200:
             result = response.json()
-            return result['responseData']['translatedText']
-        return text
-    except:
-        return text
+            translation = result[0][0][0]
+            print(f"✅ Google перевел: '{translation}'")
+            return translation
+        else:
+            print(f"❌ Google статус: {response.status_code}")
+            return None
+    except Exception as e:
+        print(f"❌ Google ошибка: {e}")
+        return None
 
-def is_russian_text(text):
-    """Проверяет содержит ли текст русские буквы"""
-    russian_letters = set('абвгдеёжзийклмнопрстуфхцчшщъыьэюя')
-    return any(char.lower() in russian_letters for char in text)
+def translate_text(text):
+    """Основная функция перевода с приоритетом DeepSeek"""
+    if not any(char.lower() in 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя' for char in text):
+        return text  # Возвращаем оригинал если нет русских букв
+    
+    # Пробуем DeepSeek сначала
+    translation = translate_with_deepseek(text)
+    if translation:
+        return translation
+    
+    # Если DeepSeek не сработал, пробуем Google
+    translation = translate_with_google_simple(text)
+    if translation:
+        return translation
+    
+    # Если все провалилось, возвращаем оригинал
+    print("⚠️ Все переводчики недоступны, используем оригинальный текст")
+    return text
 
-def generate_with_pollinations(prompt, model="pollinations", use_translation=True):
-    """Генерация через Pollinations.ai с автоматическим переводом"""
-    
-    # Автоматически переводим русский текст
-    final_prompt = prompt
-    if use_translation and is_russian_text(prompt):
-        print(f"🔤 Переводчик: '{prompt}' -> ", end="")
-        final_prompt = translate_to_english(prompt)
-        print(f"'{final_prompt}'")
-    
-    encoded_prompt = urllib.parse.quote(final_prompt)
+def generate_with_pollinations(prompt, model="pollinations"):
+    """Генерация через Pollinations.ai"""
+    encoded_prompt = urllib.parse.quote(prompt)
     seed = random.randint(1, 1000000)
     
     models = {
@@ -86,7 +116,7 @@ def generate_with_pollinations(prompt, model="pollinations", use_translation=Tru
     
     pollinations_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model={selected_model}&width=512&height=512&seed={seed}&nofilter=true"
     
-    print(f"🔧 Модель: {selected_model}, seed: {seed}")
+    print(f"🎨 Генерация: {selected_model}, seed: {seed}")
     response = requests.get(pollinations_url, timeout=60)
     
     if response.status_code == 200:
@@ -94,21 +124,13 @@ def generate_with_pollinations(prompt, model="pollinations", use_translation=Tru
     else:
         raise Exception(f"Pollinations error: {response.status_code}")
 
-def generate_with_huggingface(prompt, model_name, use_translation=True):
-    """Генерация через Hugging Face с переводом"""
-    
-    # Автоматически переводим русский текст
-    final_prompt = prompt
-    if use_translation and is_russian_text(prompt):
-        print(f"🔤 Переводчик: '{prompt}' -> ", end="")
-        final_prompt = translate_to_english(prompt)
-        print(f"'{final_prompt}'")
-    
+def generate_with_huggingface(prompt, model_name):
+    """Генерация через Hugging Face"""
     model_url = f"https://api-inference.huggingface.co/models/{model_name}"
     headers = {"Authorization": f"Bearer {HF_API_KEY}"}
     
     response = requests.post(model_url, headers=headers, json={
-        "inputs": final_prompt,
+        "inputs": prompt,
         "options": {"wait_for_model": True}
     })
     
@@ -127,16 +149,32 @@ def generate_image_route():
         if not prompt:
             return jsonify({"error": "Промпт не может быть пустым"}), 400
         
-        print(f"🎨 Оригинальный промпт: {prompt}")
-        print(f"🔧 Модель: {model_name}")
+        print(f"📝 Оригинальный промпт: '{prompt}'")
         
-        # Все модели теперь с автоматическим переводом
+        # Автоматический перевод
+        translated_prompt = translate_text(prompt)
+        
+        print(f"🔧 Модель: {model_name}")
+        print(f"🌐 Переведенный промпт: '{translated_prompt}'")
+        
+        # Генерация изображения
         if model_name in ["pollinations", "flux", "dalle"]:
-            image_bytes = generate_with_pollinations(prompt, model_name, use_translation=True)
+            image_bytes = generate_with_pollinations(translated_prompt, model_name)
         else:
-            image_bytes = generate_with_huggingface(prompt, model_name, use_translation=True)
+            image_bytes = generate_with_huggingface(translated_prompt, model_name)
         
         print("✅ УСПЕХ: Изображение сгенерировано!")
+        
+        # Возвращаем изображение и информацию о переводе
+        response_data = {
+            "image_data": image_bytes,
+            "translation_info": {
+                "original": prompt,
+                "translated": translated_prompt,
+                "was_translated": prompt != translated_prompt
+            }
+        }
+        
         return send_file(
             io.BytesIO(image_bytes),
             mimetype='image/png'
@@ -151,9 +189,9 @@ def generate_image_route():
 def health_check():
     return jsonify({"status": "OK", "message": "Сервер работает"})
 
-@app.route('/translate-test', methods=['POST'])
-def translate_test():
-    """Тестовый endpoint для проверки перевода"""
+@app.route('/translate', methods=['POST'])
+def translate_endpoint():
+    """Отдельный endpoint для тестирования перевода"""
     try:
         data = request.json
         text = data.get('text', '')
@@ -161,12 +199,17 @@ def translate_test():
         if not text:
             return jsonify({"error": "Текст не может быть пустым"}), 400
         
-        translated = translate_to_english(text)
+        print(f"🧪 Тест перевода: '{text}'")
+        
+        # Пробуем все переводчики
+        deepseek_result = translate_with_deepseek(text)
+        google_result = translate_with_google_simple(text)
         
         return jsonify({
             "original": text,
-            "translated": translated,
-            "is_russian": is_russian_text(text)
+            "deepseek_translation": deepseek_result,
+            "google_translation": google_result,
+            "is_russian": any(char.lower() in 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя' for char in text)
         })
         
     except Exception as e:
