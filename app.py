@@ -9,64 +9,40 @@ CORS(app)
 
 HF_API_KEY = os.getenv('HF_API_KEY')
 
-def generate_image(prompt):
-    """Генерация изображения с проверенной моделью"""
-    
-    # ГАРАНТИРОВАННО РАБОЧАЯ МОДЕЛЬ
-    model_url = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-dev"
-    
-    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-    
-    try:
-        print(f"Пробуем модель: {model_url}")
-        print(f"Промпт: {prompt}")
-        print(f"API Key: {HF_API_KEY[:10]}...")  # Первые 10 символов ключа
-        
-        # Простой запрос без сложных параметров
-        response = requests.post(model_url, headers=headers, json={
-            "inputs": prompt,
-            "options": {
-                "wait_for_model": True,
-                "use_cache": True
-            }
-        })
-        
-        print(f"Статус ответа: {response.status_code}")
-        
-        if response.status_code == 200:
-            print("✅ УСПЕХ: Изображение сгенерировано!")
-            return response.content
-        else:
-            error_msg = response.text[:500] if response.text else "Unknown error"
-            print(f"❌ Ошибка от модели: {error_msg}")
-            raise Exception(f"Ошибка API: {error_msg}")
-            
-    except Exception as e:
-        print(f"❌ Ошибка с моделью: {str(e)}")
-        raise e
-
 @app.route('/generate', methods=['POST'])
 def generate_image_route():
     try:
-        print("=== НАЧАЛО ГЕНЕРАЦИИ ===")
-        print(f"API Key exists: {bool(HF_API_KEY)}")
-        
         data = request.json
         prompt = data.get('prompt', '')
+        model_name = data.get('model', 'stabilityai/stable-diffusion-xl-base-1.0')  # Получаем модель из запроса
         
         if not prompt:
             return jsonify({"error": "Промпт не может быть пустым"}), 400
         
-        print(f"Получен промпт: {prompt}")
+        print(f"🎨 Генерируем: {prompt}")
+        print(f"🔧 Модель: {model_name}")
         
-        # Генерация изображения
-        image_bytes = generate_image(prompt)
+        # Формируем URL для выбранной модели
+        model_url = f"https://api-inference.huggingface.co/models/{model_name}"
+        headers = {"Authorization": f"Bearer {HF_API_KEY}"}
         
-        print("✅ УСПЕХ: Возвращаем изображение")
-        return send_file(
-            io.BytesIO(image_bytes),
-            mimetype='image/png'
-        )
+        response = requests.post(model_url, headers=headers, json={
+            "inputs": prompt,
+            "options": {"wait_for_model": True}
+        })
+        
+        print(f"🔹 Статус: {response.status_code}")
+        
+        if response.status_code == 200:
+            print("✅ УСПЕХ: Изображение сгенерировано!")
+            return send_file(
+                io.BytesIO(response.content),
+                mimetype='image/png'
+            )
+        else:
+            error_msg = response.text[:500] if response.text else "Unknown error"
+            print(f"❌ Ошибка API: {error_msg}")
+            return jsonify({"error": f"Ошибка модели: {error_msg}"}), 500
         
     except Exception as e:
         error_msg = f"Ошибка генерации: {str(e)}"
@@ -76,15 +52,6 @@ def generate_image_route():
 @app.route('/health', methods=['GET'])
 def health_check():
     return jsonify({"status": "OK", "message": "Сервер работает"})
-
-@app.route('/test', methods=['GET'])
-def test():
-    """Простой тест"""
-    return jsonify({
-        "api_key_exists": bool(HF_API_KEY),
-        "api_key_length": len(HF_API_KEY) if HF_API_KEY else 0,
-        "status": "ready"
-    })
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)
