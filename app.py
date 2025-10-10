@@ -4,9 +4,8 @@ import requests
 import io
 import urllib.parse
 import os
-import random
+import hashlib
 import logging
-import base64
 
 # Настраиваем логирование
 logging.basicConfig(level=logging.INFO)
@@ -50,7 +49,6 @@ def translate_with_deepseek(text):
         if response.status_code == 200:
             result = response.json()
             translation = result['choices'][0]['message']['content'].strip()
-            # Убираем кавычки если есть
             translation = translation.strip('"')
             logger.info(f"✅ Перевел: '{translation}'")
             return translation
@@ -64,7 +62,6 @@ def translate_with_deepseek(text):
 
 def translate_text(text):
     """Основная функция перевода"""
-    # Проверяем есть ли русские буквы
     if not any(char.lower() in 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя' for char in text):
         return text
     
@@ -91,16 +88,21 @@ def describe_image_for_prompt(image_file):
             return "an uploaded image"
     return "an uploaded image"
 
+def create_consistent_seed(prompt, model_name):
+    """Создает одинаковый seed для одинаковых промптов"""
+    # Хэшируем промпт + модель чтобы получить предсказуемый seed
+    seed_string = f"{prompt}_{model_name}"
+    seed_hash = hashlib.md5(seed_string.encode()).hexdigest()
+    # Берем первые 8 символов хэша и конвертируем в число
+    return int(seed_hash[:8], 16) % 1000000
+
 def create_smart_prompt(base_prompt, image_description=None, edit_mode=False):
     """Создает умный промпт для генерации"""
     if edit_mode and image_description:
-        # Режим редактирования изображения
         return f"{base_prompt} - edit and modify {image_description} while preserving original composition and style"
     elif image_description:
-        # Режим создания на основе изображения
         return f"{base_prompt} - based on {image_description} with similar colors and style"
     else:
-        # Обычная генерация
         return base_prompt
 
 @app.route('/generate', methods=['POST'])
@@ -108,13 +110,11 @@ def generate_image_route():
     try:
         # Определяем тип запроса
         if request.content_type and request.content_type.startswith('multipart/form-data'):
-            # Форма с файлом
             prompt = request.form.get('prompt', '')
             model_name = request.form.get('model', 'nanobanano')
             image_file = request.files.get('image')
             edit_mode = request.form.get('edit_mode') == 'true'
         else:
-            # JSON запрос
             data = request.get_json() or {}
             prompt = data.get('prompt', '')
             model_name = data.get('model', 'nanobanano')
@@ -144,11 +144,15 @@ def generate_image_route():
         
         # Генерация изображения
         encoded_prompt = urllib.parse.quote(translated_prompt)
-        seed = random.randint(1, 1000000)
+        
+        # ИСПРАВЛЕНИЕ: Убираем случайный seed, используем предсказуемый
+        seed = create_consistent_seed(translated_prompt, model_name)
+        logger.info(f"🌱 Seed: {seed} (одинаковый для одинаковых промптов)")
         
         if model_name in ["nanobanano", "pollinations", "flux", "dalle", "stable-diffusion", "midjourney"]:
-            url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model={model_name}&width=512&height=512&seed={seed}"
-            logger.info(f"🔗 Pollinations URL")
+            # БЕЗ seed параметра - будет генерировать одинаковые изображения
+            url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model={model_name}&width=512&height=512"
+            logger.info(f"🔗 Pollinations URL (без seed)")
             response = requests.get(url, timeout=60)
         else:
             url = f"https://api-inference.huggingface.co/models/{model_name}"
@@ -192,7 +196,6 @@ def translate_test():
         
         logger.info(f"🧪 Тест перевода: '{text}'")
         
-        # Проверяем русский ли текст
         is_russian = any(char.lower() in 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя' for char in text)
         
         if is_russian:
