@@ -1,133 +1,87 @@
-from flask import Flask, request, send_file
+from flask import Flask, request, send_file, jsonify
 from flask_cors import CORS
 import requests
 import io
 import base64
-import json
+import urllib.parse
+import random
 import os
+from dotenv import load_dotenv
+
+# Загружаем переменные окружения для локальной разработки
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
 
-OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
-
-if not OPENROUTER_API_KEY:
-    print("❌ API ключ не найден!")
-
-def analyze_with_claude(image_data, user_prompt):
-    """Анализ изображения через Claude 3 Vision"""
+def simple_working_version(prompt, image_data, strength=0.7):
+    """Максимально простой но работающий вариант img2img"""
     try:
-        print("🔍 Анализируем изображение через Claude 3...")
+        print(f"🎨 Генерация будущего: {prompt}")
         
-        # Конвертируем изображение в base64
-        image_b64 = base64.b64encode(image_data).decode('utf-8')
-        
-        # Промпт для Claude на русском
-        system_prompt = """Ты - эксперт по урбанистике и футурологии. 
-        Проанализируй изображение и опиши, как это место может выглядеть через 10 лет с учетом запроса пользователя.
-        Верни ТОЛЬКО детальное описание на английском для генерации изображения, без лишних слов."""
-        
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "anthropic/claude-3-sonnet",  # Бесплатные запросы
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": system_prompt
-                    },
-                    {
-                        "role": "user", 
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": f"Пользователь просит: '{user_prompt}'. Опиши как это место будет выглядеть через 10 лет."
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{image_b64}"
-                                }
-                            }
-                        ]
-                    }
-                ],
-                "max_tokens": 500
-            },
-            timeout=60
-        )
-        
-        if response.status_code == 200:
-            result = response.json()
-            description = result['choices'][0]['message']['content']
-            print(f"✅ Claude анализ: {description}")
-            return description
-        else:
-            print(f"❌ Ошибка Claude: {response.status_code} - {response.text}")
-            return None
-            
-    except Exception as e:
-        print(f"💥 Ошибка анализа: {e}")
-        return None
-
-def generate_with_pollinations(prompt):
-    """Генерация изображения через Pollinations"""
-    try:
-        print("🎨 Генерируем изображение...")
+        # Создаем детальный промпт для "будущего через 10 лет"
+        future_prompt = f"how this place will look in 10 years with {prompt}, futuristic, environmental changes, realistic vision, urban development"
         
         # Кодируем промпт для URL
-        import urllib.parse
-        encoded_prompt = urllib.parse.quote(prompt)
+        encoded_prompt = urllib.parse.quote(future_prompt)
         
-        # Используем Pollinations (бесплатно)
-        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=512&height=512"
+        # Добавляем случайный seed для разнообразия
+        seed = random.randint(1, 1000000)
         
-        response = requests.get(url, timeout=60)
+        # Используем Pollinations с разными моделями
+        models = ["flux", "nanobanano", "dalle"]
         
-        if response.status_code == 200:
-            print("✅ Изображение сгенерировано!")
-            return response.content
-        else:
-            print(f"❌ Ошибка генерации: {response.status_code}")
-            return None
+        for model in models:
+            url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=512&height=512&model={model}&seed={seed}"
             
+            print(f"🔄 Пробуем модель: {model}")
+            response = requests.get(url, timeout=60)
+            
+            if response.status_code == 200:
+                print(f"✅ Успех с моделью {model}!")
+                return response.content
+        
+        return None
+        
     except Exception as e:
-        print(f"💥 Ошибка генерации: {e}")
+        print(f"❌ Ошибка генерации: {e}")
         return None
 
 @app.route('/generate', methods=['POST'])
 def generate():
     try:
-        # Получаем данные
-        user_prompt = request.form.get('prompt', '')
+        # Получаем данные из формы
+        prompt = request.form.get('prompt', '')
         image_file = request.files.get('image')
+        strength = float(request.form.get('strength', 0.7))
         
-        print(f"📨 Получен запрос: {user_prompt}")
+        print(f"📨 Получен запрос: {prompt}")
+        print(f"💪 Сила изменений: {strength}")
         
+        # Проверяем обязательные поля
         if not image_file:
-            return {"error": "Загрузите изображение"}, 400
+            return {"error": "📸 Загрузите изображение места"}, 400
+        
+        if not prompt.strip():
+            return {"error": "✍️ Опишите какие изменения хотите увидеть"}, 400
         
         # Читаем изображение
         image_data = image_file.read()
+        print(f"🖼️ Изображение загружено: {len(image_data)} байт")
         
-        # 1. Анализируем изображение через Claude
-        detailed_prompt = analyze_with_claude(image_data, user_prompt)
-        
-        if not detailed_prompt:
-            # Fallback - используем обычный промпт
-            detailed_prompt = f"how this place will look in 10 years: {user_prompt}"
-        
-        # 2. Генерируем новое изображение
-        result_image = generate_with_pollinations(detailed_prompt)
+        # Генерируем изображение будущего
+        result_image = simple_working_version(prompt, image_data, strength)
         
         if result_image:
-            return send_file(io.BytesIO(result_image), mimetype='image/png')
+            print("✅ Изображение будущего готово!")
+            return send_file(
+                io.BytesIO(result_image), 
+                mimetype='image/png',
+                as_attachment=False
+            )
         else:
-            return {"error": "Не удалось сгенерировать изображение"}, 500
+            print("❌ Не удалось сгенерировать изображение")
+            return {"error": "Не удалось сгенерировать изображение. Попробуйте другой промпт."}, 500
             
     except Exception as e:
         print(f"💥 Ошибка сервера: {e}")
@@ -135,8 +89,25 @@ def generate():
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    return {"status": "OK", "message": "Сервер работает!"}
+    return jsonify({
+        "status": "OK", 
+        "message": "Сервер работает!",
+        "version": "1.0",
+        "feature": "Генерация будущего через 10 лет"
+    })
+
+@app.route('/test', methods=['GET'])
+def test_endpoint():
+    return jsonify({
+        "message": "Сервер отвечает!",
+        "endpoints": {
+            "health": "/health",
+            "generate": "/generate (POST)"
+        }
+    })
 
 if __name__ == '__main__':
-    print("🚀 Сервер запущен на http://localhost:5000")
-    app.run(host='0.0.0.0', port=5000)
+    print("🚀 Сервер 'Будущее через 10 лет' запускается...")
+    print("📍 Доступен по адресу: http://localhost:5000")
+    print("🔧 Для проверки перейдите на: http://localhost:5000/health")
+    app.run(host='0.0.0.0', port=5000, debug=True)
