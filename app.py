@@ -12,7 +12,19 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+
+CORS(app, resources={
+    r"/*": {
+        "origins": [
+            "https://ddm310.github.io",  # Твой GitHub Pages
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+            "http://localhost:5000"
+        ],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"]
+    }
+})
 
 def simple_working_version(prompt, image_data, strength=0.7):
     """Максимально простой но работающий вариант img2img"""
