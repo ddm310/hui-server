@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app)
 
-PROXY_SERVER_URL = os.getenv('PROXY_SERVER_URL', 'https://gemini-proxy-production-e2e2.up.railway.app')
+PROXY_SERVER_URL = os.getenv('PROXY_SERVER_URL', 'https://gemini-proxy.up.railway.app')
 
 def translate_with_deepseek(text):
     """Перевод через DeepSeek API"""
