@@ -124,20 +124,34 @@ def generate_with_pollinations(prompt, model="pollinations"):
     else:
         raise Exception(f"Pollinations error: {response.status_code}")
 
-def generate_with_huggingface(prompt, model_name):
-    """Генерация через Hugging Face"""
-    model_url = f"https://api-inference.huggingface.co/models/{model_name}"
-    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-    
-    response = requests.post(model_url, headers=headers, json={
-        "inputs": prompt,
-        "options": {"wait_for_model": True}
-    })
-    
-    if response.status_code == 200:
-        return response.content
-    else:
-        raise Exception(f"HF error: {response.status_code} - {response.text}")
+def generate_with_gemini_proxy(prompt, image_data=None):
+    """Генерация через наш прокси-сервер"""
+    try:
+        import requests
+        import base64
+        
+        proxy_url = os.getenv('PROXY_SERVER_URL') + '/generate-image'
+        
+        payload = {
+            'prompt': prompt,
+            'imageData': base64.b64encode(image_data).decode('utf-8') if image_data else None
+        }
+        
+        response = requests.post(
+            proxy_url,
+            json=payload,
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            return response.content
+        else:
+            logger.error(f"❌ Proxy error: {response.text}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"❌ Proxy connection error: {e}")
+        return None
 
 @app.route('/generate', methods=['POST'])
 def generate_image_route():
