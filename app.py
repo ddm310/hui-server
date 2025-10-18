@@ -2,95 +2,62 @@ from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import requests
 import io
-import urllib.parse
 import os
-import random
 import logging
+import base64
 
-# Настраиваем логирование
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app)
 
-def translate_text(text):
-    """Простой переводчик"""
-    if not any(char.lower() in 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя' for char in text):
-        return text
-    
-    # Простой словарь для основных слов
-    translations = {
-        'красивый': 'beautiful',
-        'закат': 'sunset', 
-        'над': 'over',
-        'морем': 'sea',
-        'море': 'sea',
-        'небо': 'sky',
-        'горы': 'mountains',
-        'лес': 'forest',
-        'город': 'city',
-        'улица': 'street',
-        'дом': 'house',
-        'кошка': 'cat',
-        'собака': 'dog',
-        'цветок': 'flower'
-    }
-    
-    # Простая замена слов
-    translated = text
-    for ru, en in translations.items():
-        translated = translated.replace(ru, en)
-    
-    logger.info(f"🌐 Перевод: '{text}' -> '{translated}'")
-    return translated
+PROXY_SERVER_URL = os.getenv('PROXY_SERVER_URL')
+
+def generate_with_gemini_proxy(prompt, image_data=None):
+    """Только Gemini через прокси"""
+    try:
+        proxy_url = f"{PROXY_SERVER_URL}/generate-image"
+        
+        payload = {'prompt': prompt}
+        
+        if image_data:
+            payload['imageData'] = base64.b64encode(image_data).decode('utf-8')
+        
+        logger.info(f"🎯 Отправка в Gemini: '{prompt}'")
+        
+        response = requests.post(proxy_url, json=payload, timeout=60)
+        
+        if response.status_code == 200:
+            logger.info("✅ Gemini успешно!")
+            return response.content
+        else:
+            logger.error(f"❌ Ошибка Gemini: {response.status_code}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка подключения: {e}")
+        return None
 
 @app.route('/generate', methods=['POST'])
 def generate_image_route():
     try:
-        if request.content_type and request.content_type.startswith('multipart/form-data'):
-            prompt = request.form.get('prompt', '')
-            model_name = request.form.get('model', 'nanobanano')
-            image_file = request.files.get('image')
-        else:
-            data = request.get_json() or {}
-            prompt = data.get('prompt', '')
-            model_name = data.get('model', 'nanobanano')
-            image_file = None
+        prompt = request.form.get('prompt', '')
+        image_file = request.files.get('image')
         
         if not prompt:
-            return jsonify({"error": "Промпт не может быть пустым"}), 400
+            return jsonify({"error": "Введите описание"}), 400
         
-        logger.info(f"🎨 Генерация: '{prompt}'")
-        logger.info(f"🔧 Модель: {model_name}")
-        
-        # Если есть изображение - сообщаем что img2img временно недоступен
+        image_data = None
         if image_file and image_file.filename:
-            logger.info("🖼️ Обнаружено изображение")
-            return jsonify({"error": "Редактирование изображений временно недоступно. Используйте режим 'Создать новое'."}), 400
+            image_data = image_file.read()
         
-        # Обычная генерация (text2img)
-        translated_prompt = translate_text(prompt)
-        logger.info(f"🌐 Переведенный промпт: '{translated_prompt}'")
+        result = generate_with_gemini_proxy(prompt, image_data)
         
-        # Стандартная генерация через Pollinations
-        encoded_prompt = urllib.parse.quote(translated_prompt)
-        seed = random.randint(1, 1000000)
-        
-        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model={model_name}&width=512&height=512&seed={seed}"
-        
-        logger.info(f"📡 Запрос к: {url}")
-        response = requests.get(url, timeout=30)
-        
-        logger.info(f"📡 Статус генерации: {response.status_code}")
-        
-        if response.status_code == 200:
-            logger.info("✅ УСПЕХ: Изображение сгенерировано!")
-            return send_file(io.BytesIO(response.content), mimetype='image/png')
+        if result:
+            return send_file(io.BytesIO(result), mimetype='image/png')
         else:
-            error_msg = response.text[:200] if response.text else "Unknown error"
-            logger.error(f"❌ Ошибка генерации: {error_msg}")
-            return jsonify({"error": f"Ошибка генерации. Попробуйте другой промпт."}), 500
+            return jsonify({"error": "Gemini временно недоступен"}), 500
         
     except Exception as e:
         logger.error(f"❌ Ошибка: {str(e)}")
@@ -98,12 +65,7 @@ def generate_image_route():
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    return jsonify({"status": "OK", "message": "Сервер работает"})
-
-@app.route('/', methods=['GET'])
-def home():
-    return jsonify({"message": "Image Generator API", "status": "active"})
+    return jsonify({"status": "OK", "proxy_url": PROXY_SERVER_URL})
 
 if __name__ == '__main__':
-    logger.info("🚀 Запуск сервера...")
     app.run(host='0.0.0.0', port=5000, debug=False)
