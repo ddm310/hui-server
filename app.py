@@ -5,7 +5,6 @@ import io
 import os
 import logging
 import base64
-import time
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -13,12 +12,14 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app)
 
+# NVIDIA API ключ (бесплатный)
+NVIDIA_API_KEY = os.getenv('NVIDIA_API_KEY', 'nvapi-xxx')  # Получи на developer.nvidia.com
+
 def translate_text(text):
-    """Перевод через Google Translate"""
+    """Простой перевод"""
     if not any(char.lower() in 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя' for char in text):
         return text
     
-    logger.info(f"🧠 Перевод: '{text}'")
     try:
         url = "https://translate.googleapis.com/translate_a/single"
         params = {
@@ -28,85 +29,54 @@ def translate_text(text):
             'dt': 't',
             'q': text
         }
-        
         response = requests.get(url, params=params, timeout=10)
         if response.status_code == 200:
             result = response.json()
-            translation = result[0][0][0]
-            logger.info(f"✅ Перевел: '{translation}'")
-            return translation
-        else:
-            return text
-            
-    except Exception as e:
-        logger.warning(f"⚠️ Ошибка перевода: {e}")
+            return result[0][0][0]
+        return text
+    except:
         return text
 
-def generate_img2img_hf(prompt, image_data):
-    """Настоящий img2img через бесплатные HF API"""
+def generate_with_nvidia(prompt, image_data=None):
+    """Генерация через NVIDIA API"""
     try:
-        # Конвертируем изображение в base64
-        image_b64 = base64.b64encode(image_data).decode('utf-8')
+        if image_data:
+            # Режим img2img
+            url = "https://integrate.api.nvidia.com/v1/editing/nv-ai-foundation/playground_flux"
+            payload = {
+                "prompt": prompt,
+                "image": f"data:image/jpeg;base64,{base64.b64encode(image_data).decode('utf-8')}",
+                "strength": 0.7,
+                "steps": 20
+            }
+        else:
+            # Режим text2img
+            url = "https://integrate.api.nvidia.com/v1/generation/nv-ai-foundation/sd_xl_turbo"
+            payload = {
+                "prompt": prompt,
+                "steps": 4,
+                "width": 512,
+                "height": 512
+            }
         
-        # Бесплатные модели которые точно работают
-        models = [
-            "lllyasviel/sd-controlnet-canny",
-            "runwayml/stable-diffusion-v1-5",
-            "stabilityai/stable-diffusion-2-1"
-        ]
+        headers = {
+            "Authorization": f"Bearer {NVIDIA_API_KEY}",
+            "Content-Type": "application/json"
+        }
         
-        for model in models:
-            try:
-                logger.info(f"🔧 Пробуем модель: {model}")
-                
-                # Используем Inference API
-                url = f"https://api-inference.huggingface.co/models/{model}"
-                
-                payload = {
-                    "inputs": prompt,
-                    "parameters": {
-                        "image": image_b64,
-                        "strength": 0.7,
-                        "guidance_scale": 7.5
-                    }
-                }
-                
-                response = requests.post(url, json=payload, timeout=60)
-                logger.info(f"📡 Статус {model}: {response.status_code}")
-                
-                if response.status_code == 200:
-                    logger.info(f"✅ Успех с {model}!")
-                    return response.content
-                elif response.status_code == 503:
-                    logger.info(f"⏳ Модель {model} загружается...")
-                    time.sleep(5)  # Ждем и пробуем еще раз
-                    response = requests.post(url, json=payload, timeout=60)
-                    if response.status_code == 200:
-                        return response.content
-                
-            except Exception as e:
-                logger.warning(f"⚠️ Модель {model} не сработала: {e}")
-                continue
+        response = requests.post(url, json=payload, headers=headers, timeout=60)
         
-        return None
-        
-    except Exception as e:
-        logger.error(f"❌ Ошибка HF img2img: {e}")
-        return None
-
-def generate_text2img(prompt):
-    """Обычная генерация через Pollinations"""
-    try:
-        import urllib.parse
-        encoded_prompt = urllib.parse.quote(prompt)
-        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model=nanobanano"
-        
-        response = requests.get(url, timeout=60)
         if response.status_code == 200:
-            return response.content
-        return None
+            result = response.json()
+            # NVIDIA возвращает base64 изображение
+            image_b64 = result['data'][0]['image']
+            return base64.b64decode(image_b64)
+        else:
+            logger.error(f"❌ NVIDIA ошибка: {response.status_code} - {response.text}")
+            return None
+            
     except Exception as e:
-        logger.error(f"❌ Ошибка Pollinations: {e}")
+        logger.error(f"❌ Ошибка NVIDIA: {e}")
         return None
 
 @app.route('/generate', methods=['POST'])
@@ -119,39 +89,30 @@ def generate_image_route():
             return jsonify({"error": "Введите описание"}), 400
 
         translated_prompt = translate_text(prompt)
-        logger.info(f"🌐 Перевод: '{translated_prompt}'")
+        logger.info(f"🎯 Промпт: '{translated_prompt}'")
 
-        # Если есть изображение - используем img2img
+        image_data = None
         if image_file and image_file.filename:
-            logger.info("🎨 Режим img2img через Hugging Face")
             image_data = image_file.read()
-            
-            result = generate_img2img_hf(translated_prompt, image_data)
-            if result:
-                logger.info("✅ Img2Img успешно завершен!")
-                return send_file(io.BytesIO(result), mimetype='image/png')
-            else:
-                logger.warning("⚠️ Img2img не сработал, пробуем text2img")
-                # Fallback на обычную генерацию
-                result = generate_text2img(f"{translated_prompt} - based on similar style")
-                if result:
-                    return send_file(io.BytesIO(result), mimetype='image/png')
+            logger.info("🎨 Режим img2img через NVIDIA")
+        else:
+            logger.info("🆕 Режим text2img через NVIDIA")
         
-        # Обычная генерация
-        logger.info("🆕 Обычная генерация")
-        result = generate_text2img(translated_prompt)
+        result = generate_with_nvidia(translated_prompt, image_data)
+        
         if result:
+            logger.info("✅ NVIDIA генерация успешна!")
             return send_file(io.BytesIO(result), mimetype='image/png')
         else:
-            return jsonify({"error": "Ошибка генерации"}), 500
+            return jsonify({"error": "NVIDIA сервис временно недоступен"}), 500
         
     except Exception as e:
         logger.error(f"❌ Ошибка: {str(e)}")
-        return jsonify({"error": f"Ошибка сервера: {str(e)}"}), 500
+        return jsonify({"error": "Ошибка сервера"}), 500
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    return jsonify({"status": "OK", "message": "Сервер работает"})
+    return jsonify({"status": "OK"})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)
