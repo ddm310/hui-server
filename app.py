@@ -48,7 +48,7 @@ def generate_with_nvidia(prompt, image_data=None):
         
         if image_data:
             # Img2Img через FLUX модель
-            url = "https://ai.api.nvidia.com/v1/generation/accounts/api/models/playground/playground-flux"
+            url = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-kontext-dev"
             payload = {
                 "prompt": prompt,
                 "image": f"data:image/jpeg;base64,{base64.b64encode(image_data).decode('utf-8')}",
@@ -59,7 +59,7 @@ def generate_with_nvidia(prompt, image_data=None):
             }
         else:
             # Text2Img 
-            url = "https://ai.api.nvidia.com/v1/generation/accounts/api/models/playground/playground-flux"
+            url = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-dev"
             payload = {
                 "prompt": prompt,
                 "steps": 20,
