@@ -5,7 +5,7 @@ import io
 import os
 import logging
 import base64
-import json
+import random
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -25,7 +25,7 @@ def translate_text(text):
         url = "https://translate.googleapis.com/translate_a/single"
         params = {
             'client': 'gtx',
-            'sl': 'ru', 
+            'sl': 'ru',
             'tl': 'en',
             'dt': 't',
             'q': text
@@ -38,51 +38,72 @@ def translate_text(text):
     except:
         return text
 
-def generate_with_nvidia(prompt, image_data=None):
-    """Генерация через NVIDIA API"""
+def generate_with_nvidia_img2img(prompt, image_data):
+    """Img2img через FLUX Kontext"""
     try:
+        invoke_url = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-kontext-dev"
+        
         headers = {
             "Authorization": f"Bearer {NVIDIA_API_KEY}",
-            "Content-Type": "application/json"
+            "Accept": "application/json",
         }
-        
-        if image_data:
-            # Img2Img через FLUX модель
-            url = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-kontext-dev"
-            payload = {
-                "prompt": prompt,
-                "image": f"data:image/jpeg;base64,{base64.b64encode(image_data).decode('utf-8')}",
-                "strength": 0.7,
-                "steps": 20,
-                "width": 512,
-                "height": 512
-            }
-        else:
-            # Text2Img 
-            url = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-dev"
-            payload = {
-                "prompt": prompt,
-                "steps": 20,
-                "width": 512, 
-                "height": 512
-            }
-        
-        logger.info(f"🔗 Отправка запроса к NVIDIA: {url}")
-        response = requests.post(url, json=payload, headers=headers, timeout=60)
-        
-        logger.info(f"📡 Статус NVIDIA: {response.status_code}")
+
+        payload = {
+            "prompt": prompt,
+            "image": f"data:image/jpeg;base64,{base64.b64encode(image_data).decode('utf-8')}",
+            "aspect_ratio": "match_input_image",
+            "steps": 20,
+            "cfg_scale": 3.5,
+            "seed": random.randint(0, 1000000)
+        }
+
+        response = requests.post(invoke_url, headers=headers, json=payload, timeout=60)
         
         if response.status_code == 200:
             result = response.json()
             # NVIDIA возвращает base64 изображение
-            image_b64 = result['artifacts'][0]['image']
+            image_b64 = result['data'][0]['image']
             return base64.b64decode(image_b64)
         else:
-            logger.error(f"❌ NVIDIA ошибка: {response.status_code} - {response.text}")
+            logger.error(f"❌ NVIDIA img2img ошибка: {response.status_code} - {response.text}")
             return None
             
     except Exception as e:
-        logger.error(f"❌ Ошибка NVIDIA: {e}")
+        logger.error(f"❌ Ошибка NVIDIA img2img: {e}")
+        return None
+
+def generate_with_nvidia_text2img(prompt):
+    """Text2img через FLUX"""
+    try:
+        invoke_url = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-dev"
+        
+        headers = {
+            "Authorization": f"Bearer {NVIDIA_API_KEY}",
+            "Accept": "application/json",
+        }
+
+        payload = {
+            "prompt": prompt,
+            "mode": "base",
+            "cfg_scale": 3.5,
+            "width": 512,
+            "height": 512,
+            "seed": random.randint(0, 1000000),
+            "steps": 20
+        }
+
+        response = requests.post(invoke_url, headers=headers, json=payload, timeout=60)
+        
+        if response.status_code == 200:
+            result = response.json()
+            image_b64 = result['data'][0]['image']
+            return base64.b64decode(image_b64)
+        else:
+            logger.error(f"❌ NVIDIA text2img ошибка: {response.status_code} - {response.text}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка NVIDIA text2img: {e}")
         return None
 
 @app.route('/generate', methods=['POST'])
@@ -97,14 +118,23 @@ def generate_image_route():
         translated_prompt = translate_text(prompt)
         logger.info(f"🎯 Промпт: '{translated_prompt}'")
 
-        image_data = None
+        # Если есть изображение - используем img2img
         if image_file and image_file.filename:
+            logger.info("🎨 Режим img2img через NVIDIA FLUX Kontext")
             image_data = image_file.read()
-            logger.info("🎨 Режим img2img через NVIDIA")
-        else:
-            logger.info("🆕 Режим text2img через NVIDIA")
+            
+            result = generate_with_nvidia_img2img(translated_prompt, image_data)
+            if result:
+                logger.info("✅ NVIDIA img2img успешно!")
+                return send_file(io.BytesIO(result), mimetype='image/png')
+            else:
+                logger.warning("⚠️ NVIDIA img2img не сработал, пробуем text2img")
+                result = generate_with_nvidia_text2img(f"{translated_prompt} - editing original image")
         
-        result = generate_with_nvidia(translated_prompt, image_data)
+        # Обычная генерация
+        else:
+            logger.info("🆕 Режим text2img через NVIDIA FLUX")
+            result = generate_with_nvidia_text2img(translated_prompt)
         
         if result:
             logger.info("✅ NVIDIA генерация успешна!")
