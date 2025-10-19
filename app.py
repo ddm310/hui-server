@@ -2,103 +2,61 @@ from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import requests
 import io
-import os
-import logging
 import random
 import urllib.parse
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+import os
 
 app = Flask(__name__)
 CORS(app)
 
-def translate_text(text):
-    """Перевод через Google Translate"""
-    if not any(char.lower() in 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя' for char in text):
-        return text
-    
-    logger.info(f"🧠 Перевод: '{text}'")
-    try:
-        url = "https://translate.googleapis.com/translate_a/single"
-        params = {
-            'client': 'gtx',
-            'sl': 'ru',
-            'tl': 'en',
-            'dt': 't',
-            'q': text
-        }
-        
-        response = requests.get(url, params=params, timeout=10)
-        if response.status_code == 200:
-            result = response.json()
-            translation = result[0][0][0]
-            logger.info(f"✅ Перевел: '{translation}'")
-            return translation
-        else:
-            logger.warning("⚠️ Google Translate не сработал, используем оригинал")
-            return text
-    except Exception as e:
-        logger.warning(f"⚠️ Ошибка перевода: {e}, используем оригинал")
-        return text
-
-def generate_with_pollinations(prompt):
-    """Генерация через Pollinations"""
-    try:
-        # Добавляем случайность для разных результатов
-        seed = random.randint(1, 1000000)
-        
-        # Используем FLUX для лучшего качества
-        final_prompt = f"{prompt} --seed {seed} --model flux"
-        encoded_prompt = urllib.parse.quote(final_prompt)
-        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}"
-        
-        logger.info(f"🎯 Pollinations запрос: {final_prompt}")
-        
-        response = requests.get(url, timeout=45)
-        
-        if response.status_code == 200:
-            logger.info("✅ Изображение сгенерировано!")
-            return response.content
-        else:
-            logger.error(f"❌ Ошибка Pollinations: {response.status_code}")
-            return None
-            
-    except Exception as e:
-        logger.error(f"❌ Ошибка Pollinations: {e}")
-        return None
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({"status": "OK", "message": "Server is working"})
 
 @app.route('/generate', methods=['POST'])
 def generate_image_route():
     try:
-        prompt = request.form.get('prompt', '')
-        
+        # Получаем промпт
+        prompt = request.form.get('prompt', '').strip()
         if not prompt:
             return jsonify({"error": "Введите описание"}), 400
-
-        # Переводим промпт
-        translated_prompt = translate_text(prompt)
-        logger.info(f"🌐 Оригинал: '{prompt}' -> Перевод: '{translated_prompt}'")
-
-        # Генерируем изображение
-        result = generate_with_pollinations(translated_prompt)
         
-        if result:
-            return send_file(io.BytesIO(result), mimetype='image/png')
+        print(f"🎯 Получен промпт: {prompt}")
+        
+        # Простой перевод (инлайн)
+        translated_prompt = prompt
+        if any(char in 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя' for char in prompt.lower()):
+            try:
+                # Простой перевод через Google
+                url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=ru&tl=en&dt=t&q={urllib.parse.quote(prompt)}"
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    result = response.json()
+                    translated_prompt = result[0][0][0]
+                    print(f"🌐 Переведено: {translated_prompt}")
+            except:
+                translated_prompt = prompt
+        
+        # Генерация через Pollinations
+        seed = random.randint(1, 1000000)
+        final_prompt = f"{translated_prompt} --seed {seed}"
+        encoded_prompt = urllib.parse.quote(final_prompt)
+        
+        pollinations_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}"
+        print(f"🚀 Запрос к: {pollinations_url}")
+        
+        response = requests.get(pollinations_url, timeout=30)
+        
+        if response.status_code == 200:
+            print("✅ Изображение сгенерировано успешно!")
+            return send_file(io.BytesIO(response.content), mimetype='image/png')
         else:
-            return jsonify({"error": "Сервис генерации временно недоступен"}), 500
-        
+            print(f"❌ Ошибка Pollinations: {response.status_code}")
+            return jsonify({"error": "Ошибка генерации изображения"}), 500
+            
     except Exception as e:
-        logger.error(f"❌ Ошибка: {str(e)}")
+        print(f"💥 Критическая ошибка: {str(e)}")
         return jsonify({"error": "Внутренняя ошибка сервера"}), 500
-
-@app.route('/health', methods=['GET'])
-def health_check():
-    return jsonify({
-        "status": "OK", 
-        "message": "Сервер работает",
-        "service": "Pollinations Image Generator"
-    })
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
