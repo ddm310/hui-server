@@ -5,6 +5,7 @@ import io
 import os
 import logging
 import base64
+import json
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -12,8 +13,8 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app)
 
-# NVIDIA API ключ (бесплатный)
-NVIDIA_API_KEY = os.getenv('NVIDIA_API_KEY', 'nvapi-xxx')  # Получи на developer.nvidia.com
+# NVIDIA API ключ
+NVIDIA_API_KEY = os.getenv('NVIDIA_API_KEY')
 
 def translate_text(text):
     """Простой перевод"""
@@ -24,7 +25,7 @@ def translate_text(text):
         url = "https://translate.googleapis.com/translate_a/single"
         params = {
             'client': 'gtx',
-            'sl': 'ru',
+            'sl': 'ru', 
             'tl': 'en',
             'dt': 't',
             'q': text
@@ -40,36 +41,41 @@ def translate_text(text):
 def generate_with_nvidia(prompt, image_data=None):
     """Генерация через NVIDIA API"""
     try:
-        if image_data:
-            # Режим img2img
-            url = "https://integrate.api.nvidia.com/v1/editing/nv-ai-foundation/playground_flux"
-            payload = {
-                "prompt": prompt,
-                "image": f"data:image/jpeg;base64,{base64.b64encode(image_data).decode('utf-8')}",
-                "strength": 0.7,
-                "steps": 20
-            }
-        else:
-            # Режим text2img
-            url = "https://integrate.api.nvidia.com/v1/generation/nv-ai-foundation/sd_xl_turbo"
-            payload = {
-                "prompt": prompt,
-                "steps": 4,
-                "width": 512,
-                "height": 512
-            }
-        
         headers = {
             "Authorization": f"Bearer {NVIDIA_API_KEY}",
             "Content-Type": "application/json"
         }
         
+        if image_data:
+            # Img2Img через FLUX модель
+            url = "https://ai.api.nvidia.com/v1/generation/accounts/api/models/playground/playground-flux"
+            payload = {
+                "prompt": prompt,
+                "image": f"data:image/jpeg;base64,{base64.b64encode(image_data).decode('utf-8')}",
+                "strength": 0.7,
+                "steps": 20,
+                "width": 512,
+                "height": 512
+            }
+        else:
+            # Text2Img 
+            url = "https://ai.api.nvidia.com/v1/generation/accounts/api/models/playground/playground-flux"
+            payload = {
+                "prompt": prompt,
+                "steps": 20,
+                "width": 512, 
+                "height": 512
+            }
+        
+        logger.info(f"🔗 Отправка запроса к NVIDIA: {url}")
         response = requests.post(url, json=payload, headers=headers, timeout=60)
+        
+        logger.info(f"📡 Статус NVIDIA: {response.status_code}")
         
         if response.status_code == 200:
             result = response.json()
             # NVIDIA возвращает base64 изображение
-            image_b64 = result['data'][0]['image']
+            image_b64 = result['artifacts'][0]['image']
             return base64.b64decode(image_b64)
         else:
             logger.error(f"❌ NVIDIA ошибка: {response.status_code} - {response.text}")
